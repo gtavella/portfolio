@@ -1,0 +1,68 @@
+{% import "buttons.html" as buttons %}
+
+
+
+{% macro columns(ctx) %}
+    {% set col %}
+    <tr>
+        <th>Banca</th>
+        <th>Conto</th>
+        <th>Data saldo iniziale</th>
+        <th>Saldo iniziale</th>
+        <th>{{ get_label_saldo(ctx) }}</th>
+        <th>Azioni</th>
+    </tr>
+    {% endset %}
+    <thead>{{ col }}</thead>
+    <tfoot>{{ col }}</tfoot>
+{% endmacro %}
+
+
+
+{% macro body(ctx) %}
+<tbody>{{ rows(ctx) }}</tbody>
+{% endmacro %}
+
+ 
+
+{% macro rows(ctx) %}
+    {# THIS IS FOR CONTI CORRENTI #}
+    {% for cc in ctx.db_data.data["conti_correnti"] %}
+
+        {# show either saldo or saldo error #}
+        {% set saldo_or_error %}
+            {% if cc["err"] is none  %}
+                {{ add_euro( cc["saldo"] ) }}
+            {% else %}
+                {{ cc["err"] }}
+            {% endif %}
+        {% endset %}
+                
+
+        <tr>    
+            <td>{{cc["nome_banca"]}}</td>
+            <td>{{cc["numero_conto"]}}</td>
+            <td>{{cc["data_saldo_iniziale"]}}</td>
+
+            <td>{{ add_euro( cc["saldo_iniziale"] ) }}</td>
+            <td>{{ saldo_or_error }}</td>
+
+            {# ACTIONS #}
+            <th>
+                {{ buttons.edit(
+                    href=url_for("user_util.gestione_cassa_cc_modifica", id_item=cc["id"])) }}
+
+                {{ buttons.remove(
+                        id_item=cc["id"],
+                        href=url_for("json_conti_correnti.rimuovi", id_item=cc["id"])) }}
+            </th>
+        </tr>
+
+    {% endfor %}
+{% endmacro %}
+
+
+
+
+{# this is where you render the entire table or only rows #}
+{% if only_rows %}{{ rows(ctx) }}{% else %}{{ columns(ctx) }}{{ body(ctx) }}{% endif %}
