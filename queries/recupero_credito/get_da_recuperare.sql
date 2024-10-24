@@ -27,7 +27,7 @@ STATI
 -- fattura=si E pagato=no
 -- i loro totali (gestione, stipendio ecc.) possono essere o anche no.
 -- 
-WITH committ_mai_pagato AS (
+WITH committ_conferma_non_pagato AS (
     SELECT 
         -- campi del committente
         committ.id AS id_committente,
@@ -39,6 +39,10 @@ WITH committ_mai_pagato AS (
         -- campi delle conferme
         conf.anno AS anno,
         conf.mese AS mese,
+        -- campi del recupero. siccome ogni committente qui non e' mai stato
+        -- in recupero, allora e' nullo
+        NULL AS esito,
+        NULL AS note,
         -- campi delle fatture/totali
         CAST((COALESCE(fatt.totale_gestione,0) 
         + COALESCE(fatt.totale_iva,0) 
@@ -49,22 +53,19 @@ WITH committ_mai_pagato AS (
     -- solo se non hanno pagato. ignora gli altri committenti, e ignora i committenti che 
     -- non hanno mai avuto una conferma
     FROM 
-         contracts committ
-    JOIN
         conferme_mensili_per_mese_view conf
-        ON committ.id = conf.id_committente
-    -- ? join tra committenti che non hanno pagato, e trova i loro totali/totale fattura
-    -- un committente potrebbe anche non avere mai avuto un totale?
-    RIGHT JOIN
+    -- i committenti selezionati devono avere almeno una conferma (left join)
+    LEFT JOIN
         fatture2_view fatt
-        ON committ.id = fatt.id_committente
+        ON conf.id_committente = fatt.id_committente
+        AND conf.anno = fatt.anno
+        AND conf.mese = fatt.mese 
+    JOIN
+        contracts committ
+        ON committ.id = conf.id_committente
     WHERE
-        -- seleziona solo le fatture il cui periodo 
-        -- e' uguale a quelle delle conferme  
-        conf.anno = fatt.anno
-        AND conf.mese = fatt.mese
         -- filtra per "non pagato"
-        AND conf.fattura = 1
+        conf.fattura = 1
         AND conf.pagamento = 0
         -- seleziona le conferme solo nel periodo dato
         AND conf.anno BETWEEN :start_year AND :end_year
@@ -83,47 +84,109 @@ committ_recupero AS (
         -- campi delle recupero
         rec.anno AS anno,
         rec.mese AS mese,
+        rec.esito AS esito,
+        rec.note AS note,
         -- campi delle fatture/totali
         CAST((COALESCE(fatt.totale_gestione,0) 
         + COALESCE(fatt.totale_iva,0) 
         + COALESCE(fatt.totale_stipendio,0)) AS FLOAT) AS totale_fattura,
         -- stato 
         (CASE 
-            WHEN rec.esito = 'pagato' THEN 'recupero pagato'
+            WHEN rec.esito IN ('pagato', 'chiudere appalto') THEN 'recupero pagato'
             ELSE 'recupero non pagato'
         END) AS stato_credito
     -- inner join: recupero crediti e committenti: seleziona solo i committenti 
     -- che esistono solo nel recupero 
     FROM
         recupero_crediti rec
+    -- prendi tutti quelli del recupero (left join)
+    LEFT JOIN
+        fatture2_view fatt
+        ON rec.id_committente = fatt.id_committente
+        AND rec.anno = fatt.anno
+        AND rec.mese = fatt.mese
     JOIN
         contracts committ
         ON rec.id_committente = committ.id
-    RIGHT JOIN
-        fatture2_view fatt
-        ON committ.id = fatt.id_committente
     WHERE
-        -- anno e mese del recupero devono essere uguali ad anno e mese dei totali 
-        rec.anno = fatt.anno
-        AND rec.mese = fatt.mese
         -- seleziona le conferme solo nel periodo dato
-        AND rec.anno BETWEEN :start_year AND :end_year
+        rec.anno BETWEEN :start_year AND :end_year
         AND rec.mese BETWEEN :start_month AND :end_month
+),
+
+-- i committenti che hanno pagato sono solo quelli che sono in recupero e hanno pagato
+
+committ_recupero_pagato AS (
+    SELECT *
+    FROM committ_recupero
+    WHERE esito = 'pagato'
+    ORDER BY totale_fattura DESC, id_committente ASC
+),
+
+committ_recupero_chiudere_appalto AS (
+    SELECT *
+    FROM committ_recupero
+    WHERE esito = 'chiudere appalto'
+    ORDER BY totale_fattura DESC, id_committente ASC
+),
+
+-- in poche parole qualsiasi esito che non e' o pagato o chiudere appalto, si dice non pagato
+
+committ_recupero_non_pagato AS (
+    SELECT *
+    FROM committ_recupero
+    WHERE esito NOT IN ('pagato', 'chiudere appalto')
+),
+
+-- i committenti che non hanno pagato sono quelli che non hanno MAI pagato,
+-- e quelli che sono in recupero e ancora non hanno pagato
+-- ordinali per totale fattura piu alto
+
+-- se il committente-anno-mese in recupero non pagato, esiste anche 
+-- in conferma non pagato, includi solo il committente-anno-mese 
+-- del recupero
+
+-- seleziona tutti quelli che sono in recupero_non_pagato,
+-- e tutti quelli che sono in conferma_non_pagato ma non in recupero_non_pagato
+
+
+
+committ_non_pagato_tutti AS (
+
+    SELECT * 
+    FROM committ_recupero_non_pagato
+    
+    UNION 
+
+    -- seleziona i committenti che non hanno la conferma pagamento,
+    -- solo se non esistono nel recupero
+    SELECT *
+    FROM committ_conferma_non_pagato
+    WHERE id_committente NOT IN ( SELECT id_committente FROM committ_recupero_non_pagato )
+
+    ORDER BY totale_fattura DESC, id_committente ASC
 )
 
+-- questa e' il risultato finale
+-- prima ci sono i committenti che non hanno pagato (mai pagato, o in recupero e non pagato)
+-- e alla fine i committenti che hanno pagato
 
+-- se esistono committente-anno-mese che non hanno pagato, ma sono gia' in recupero, 
+-- mostra solo quello del recupero 
 
+-- in questo modo mi assicuro che il committente esce una sola volta
+-- (altrimenti uscirebbe sia perche' non ha pagato in conferme, 
+-- sia perche' non ha pagato in recupero)
 
 SELECT *
-FROM 
-    committ_mai_pagato
+FROM committ_non_pagato_tutti
 
-UNION 
+-- UNION 
 
-SELECT *
-FROM 
-    committ_recupero
+-- SELECT * 
+-- FROM committ_recupero_pagato
 
-ORDER BY 
-    -- i totali fattura piu' grandi sono i primi
-    totale_fattura DESC
+-- UNION 
+
+-- SELECT *
+-- FROM committ_recupero_chiudere_appalto
