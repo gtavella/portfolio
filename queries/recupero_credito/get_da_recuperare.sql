@@ -149,12 +149,20 @@ committ_recupero_non_pagato AS (
 -- seleziona tutti quelli che sono in recupero_non_pagato,
 -- e tutti quelli che sono in conferma_non_pagato ma non in recupero_non_pagato
 
-
+-- committenti lavorati, con diversi esiti 
+-- quindi pagato, chiudere appalto e non vuole pagare
+committ_recupero_lavorati AS (
+    SELECT * 
+    FROM committ_recupero
+    WHERE esito IN ('pagato', 'chiudere appalto', 'non vuole pagare')
+),
 
 committ_non_pagato_tutti AS (
 
+    -- tutti quelli che ancora non sono definitivi 
     SELECT * 
-    FROM committ_recupero_non_pagato
+    FROM committ_recupero
+    WHERE id_committente NOT IN (SELECT id_committente FROM committ_recupero_lavorati)
     
     UNION 
 
@@ -162,7 +170,7 @@ committ_non_pagato_tutti AS (
     -- solo se non esistono nel recupero
     SELECT *
     FROM committ_conferma_non_pagato
-    WHERE id_committente NOT IN ( SELECT id_committente FROM committ_recupero_non_pagato )
+    WHERE id_committente NOT IN (SELECT id_committente FROM committ_recupero)
 
     ORDER BY totale_fattura DESC, id_committente ASC
 )
