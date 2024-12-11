@@ -4,7 +4,7 @@ Q2 = dipendenti di Q1 con i dati associati del committente del dipendente
 Q3 = dipendenti Q2 ma solo quelli categorizzati come da pagare e con un stipendio effettivo > 0
 Q4 = dipendenti Q3 meno quelli che sono (nelle N tabelle temporanee di) malattia
 Q5 = dipendenti Q4 con i dati associati della societa' con cui e' stato fatturato il committente
-Q_OUT = Q2
+Q_OUT = Q5
 */
 
 WITH Q1 AS (
